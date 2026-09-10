@@ -11,6 +11,17 @@ const REACTIONS_NAMESPACE = "custom"
 const REACTIONS_KEY = "reactions"
 const PLAY_COUNT_KEY = "play_count"
 
+// Belt-and-suspenders with `dynamic = "force-dynamic"`: this defeats the Vercel CDN
+// caching GET responses (`x-vercel-cache: HIT`), which would otherwise serve stale
+// reaction/play counts.
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate",
+} as const
+
+function jsonNoStore(body: unknown, init?: { status?: number }): NextResponse {
+  return NextResponse.json(body, { status: init?.status, headers: NO_STORE_HEADERS })
+}
+
 type ReactionBody = {
   handle: string
   emoji: string
@@ -158,19 +169,19 @@ export async function GET(request: NextRequest) {
   const adminToken = process.env.SHOPIFY_ADMIN_TOKEN
 
   if (!appSecret || !adminToken) {
-    return NextResponse.json({ error: "Server is not configured" }, { status: 500 })
+    return jsonNoStore({ error: "Server is not configured" }, { status: 500 })
   }
 
   // 1. Verify the request actually came through the Shopify App Proxy.
   const { searchParams } = request.nextUrl
   if (!verifyAppProxySignature(searchParams, appSecret)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+    return jsonNoStore({ error: "Invalid signature" }, { status: 401 })
   }
 
   // Prefer the shop domain from the signed query params; fall back to an env override.
   const shopDomain = searchParams.get("shop") ?? process.env.SHOPIFY_STORE_DOMAIN
   if (!shopDomain) {
-    return NextResponse.json({ error: "Unable to determine shop domain" }, { status: 400 })
+    return jsonNoStore({ error: "Unable to determine shop domain" }, { status: 400 })
   }
 
   // 2. Read and validate the request params from the query string.
@@ -179,11 +190,11 @@ export async function GET(request: NextRequest) {
   const action = searchParams.get("action")
 
   if (!handle) {
-    return NextResponse.json({ error: "Missing product handle" }, { status: 400 })
+    return jsonNoStore({ error: "Missing product handle" }, { status: 400 })
   }
 
   if (action !== "add" && action !== "remove" && action !== "play") {
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 })
+    return jsonNoStore({ error: "Unknown action" }, { status: 400 })
   }
 
   const body: RequestBody =
@@ -199,7 +210,7 @@ export async function GET(request: NextRequest) {
 
     const product = data.productByIdentifier
     if (!product) {
-      return NextResponse.json({ error: "Product not found" }, { status: 404 })
+      return jsonNoStore({ error: "Product not found" }, { status: 404 })
     }
 
     if (body.action === "play") {
@@ -220,15 +231,15 @@ export async function GET(request: NextRequest) {
 
       const userErrors = result.metafieldsSet.userErrors
       if (userErrors.length > 0) {
-        return NextResponse.json({ error: "Failed to update play count", details: userErrors }, { status: 502 })
+        return jsonNoStore({ error: "Failed to update play count", details: userErrors }, { status: 502 })
       }
 
-      return NextResponse.json({ handle: body.handle, playCount: next })
+      return jsonNoStore({ handle: body.handle, playCount: next })
     }
 
     if (isReactionBody(body)) {
       if (typeof body.emoji !== "string" || !body.emoji) {
-        return NextResponse.json({ error: "Missing emoji" }, { status: 400 })
+        return jsonNoStore({ error: "Missing emoji" }, { status: 400 })
       }
 
       const reactions = parseReactions(product.reactions?.value)
@@ -256,15 +267,15 @@ export async function GET(request: NextRequest) {
 
       const userErrors = result.metafieldsSet.userErrors
       if (userErrors.length > 0) {
-        return NextResponse.json({ error: "Failed to update reactions", details: userErrors }, { status: 502 })
+        return jsonNoStore({ error: "Failed to update reactions", details: userErrors }, { status: 502 })
       }
 
-      return NextResponse.json({ handle: body.handle, reactions })
+      return jsonNoStore({ handle: body.handle, reactions })
     }
 
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 })
+    return jsonNoStore({ error: "Unknown action" }, { status: 400 })
   } catch (error) {
     console.log("[v0] /api/reacts error:", error instanceof Error ? error.message : error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return jsonNoStore({ error: "Internal server error" }, { status: 500 })
   }
 }
