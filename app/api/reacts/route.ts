@@ -153,7 +153,7 @@ function parseReactions(raw: string | null | undefined): Record<string, number> 
   return {}
 }
 
-export async function POST(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const appSecret = process.env.SHOPIFY_APP_SECRET
   const adminToken = process.env.SHOPIFY_ADMIN_TOKEN
 
@@ -173,17 +173,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unable to determine shop domain" }, { status: 400 })
   }
 
-  // 2. Parse and validate the body.
-  let body: RequestBody
-  try {
-    body = (await request.json()) as RequestBody
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
-  }
+  // 2. Read and validate the request params from the query string.
+  // The App Proxy only forwards GET requests, so handle/emoji/action arrive as query params.
+  const handle = searchParams.get("handle")
+  const action = searchParams.get("action")
 
-  if (!body || typeof body.handle !== "string" || !body.handle) {
+  if (!handle) {
     return NextResponse.json({ error: "Missing product handle" }, { status: 400 })
   }
+
+  if (action !== "add" && action !== "remove" && action !== "play") {
+    return NextResponse.json({ error: "Unknown action" }, { status: 400 })
+  }
+
+  const body: RequestBody =
+    action === "play"
+      ? { handle, action }
+      : { handle, action, emoji: searchParams.get("emoji") ?? "" }
 
   try {
     // 3. Load the product and its current metafields.
